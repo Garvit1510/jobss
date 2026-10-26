@@ -5,6 +5,7 @@ credentials.json
 *.pem
 *.key
 .credentials
+.gitconfig
 node_modules/
 .venv/
 venv/
