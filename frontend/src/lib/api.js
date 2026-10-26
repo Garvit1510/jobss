@@ -1,6 +1,8 @@
 import axios from "axios";
 
-export const API_BASE = `${process.env.REACT_APP_BACKEND_URL}/api`;
+export const API_BASE = process.env.NODE_ENV === "production"
+  ? "/api"
+  : `${process.env.REACT_APP_BACKEND_URL || "http://localhost:8000"}/api`;
 
 const api = axios.create({ baseURL: API_BASE, withCredentials: true, adapter: "fetch" });
 
@@ -50,7 +52,10 @@ api.interceptors.response.use(
         return api(cfg);
       } catch (e) {
         refreshing = null;
+        window.dispatchEvent(new CustomEvent("joblens:auth-expired"));
       }
+    } else if (status === 401 && !cfg.url?.includes("/auth/refresh") && (detail === "Token expired" || ["Not authenticated", "Invalid token", "Invalid token type", "User not found"].includes(detail))) {
+      window.dispatchEvent(new CustomEvent("joblens:auth-expired"));
     }
     return Promise.reject(error);
   }

@@ -12,14 +12,21 @@ export function AuthProvider({ children }) {
     try {
       const { data } = await api.get("/auth/me");
       setUser(data);
-    } catch {
-      setUser(false);
+    } catch (error) {
+      const status = error?.response?.status;
+      if (status === 401 || status === 403) setUser(false);
     }
   }, []);
 
   useEffect(() => {
     check();
   }, [check]);
+
+  useEffect(() => {
+    if (user !== null) return undefined;
+    const retry = setInterval(check, 8000);
+    return () => clearInterval(retry);
+  }, [user, check]);
 
   useEffect(() => {
     const onReplaced = () => {
@@ -32,11 +39,17 @@ export function AuthProvider({ children }) {
       setUser(false);
       toast.error(e.detail);
     };
+    const onExpired = () => {
+      setUser(false);
+      toast.error("Your session has expired. Please log in again.");
+    };
     window.addEventListener("joblens:session-replaced", onReplaced);
     window.addEventListener("joblens:banned", onBanned);
+    window.addEventListener("joblens:auth-expired", onExpired);
     return () => {
       window.removeEventListener("joblens:session-replaced", onReplaced);
       window.removeEventListener("joblens:banned", onBanned);
+      window.removeEventListener("joblens:auth-expired", onExpired);
     };
   }, []);
 

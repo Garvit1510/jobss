@@ -11,3 +11,5 @@ The backend attempts Groq first for each AI request and falls back to Gemini if 
 - `GEMINI_MODEL` and optional `GEMINI_FALLBACK_MODELS`: Gemini primary and fallback model names.
 
 Keep provider API keys on the backend host only. Do not put them in Netlify frontend variables or commit them to the repository. The `/api/ai/status` endpoint reports configuration and local cooldown state; it does not validate keys with live provider requests. Backend logs record which provider was attempted and which one succeeded.
+
+In production, the frontend calls `/api` through the Netlify proxy configured in `netlify.toml`. This keeps authenticated API requests same-origin with the site so browsers can retain and send the secure session cookies.
