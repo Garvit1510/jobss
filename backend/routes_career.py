@@ -37,7 +37,7 @@ def completion(profile, resume):
 
 # ---------------- taxonomy ----------------
 @router.get("/careers/sectors")
-async def list_sectors(user=Depends(current_user)):
+async def list_sectors():
     counts = {d["_id"]: d["n"] async for d in db.jobs.aggregate([{"$match": {"duplicate": {"$ne": True}}}, {"$group": {"_id": "$sector", "n": {"$sum": 1}}}])}
     return {"sectors": [careers.public(s, counts.get(s["id"], 0)) for s in careers.sectors()], "other_jobs": counts.get("other", 0)}
 
