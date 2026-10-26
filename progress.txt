@@ -1,0 +1,293 @@
+JobLens AI - progress log
+=========================
+
+[2026-10-09] AI Mock Interview: realistic questions upgrade
+-----------------------------------------------------------
+Files changed
+- backend/interview_ai.py (NEW): question generation, validation, adaptive difficulty, separate evaluation rubric
+- backend/routes_prep.py: /interview/start + /interview/answer now use interview_ai; new start fields
+  level (Auto|Fresher|Junior|Mid|Senior), job_id, job_description; evaluation + next question run in parallel
+- frontend/src/pages/AIInterview.js: "Your level" picker, optional "Paste job description", prefill from /interview?job=<id>
+- frontend/src/components/interview/InterviewChat.js: shows short interviewer reaction above the question
+- frontend/src/components/interview/VoiceInterview.js: speaks only "reaction + question" (markdown/numbering stripped);
+  no separate spoken feedback; Repeat speaks the question only
+- frontend/src/components/job/PrepareTab.js: "Mock interview for this job" button (passes job description as context)
+
+Improvements
+1. Realistic questions: interviewer prompt (QUESTION_SYS) enforces ONE question, 1-2 sentences, ~8-25 words,
+   conversational, practical, no bundled sub-questions, no textbook preambles, no answer hints.
+2. Profile match: role, company, level, job description (pasted or from the selected job) and resume are in context.
+3. Interview structure: per-type stage plan (intro -> resume/projects -> core technical -> problem solving ->
+   scenario -> behavioral/HR). Stage is a suggestion; the interviewer may follow up instead.
+4. Conversational: each question carries a short "reaction" to the previous answer ("Correct.", "Not quite.").
+   Weak/incomplete answers get one short probing follow-up; max one follow-up in a row, then it moves on.
+5. Difficulty control: Easy/Medium/Hard. Fresher/Junior start Easy and only rise after strong answers;
+   Mid/Senior start Medium. Two weak answers lower difficulty.
+6. Voice: only the reaction + current question are spoken, cleaned of markdown/labels; listening starts after speech ends.
+7. Separate evaluation: EVAL_SYS rubric (correctness, relevance, completeness, clarity, 0-10 each) with an explicit
+   rule not to penalise short but correct answers; final report prompt has the same rule.
+8. Validation: every generated question is checked (word limit 30, or 38 for scenario/problem; max one "?";
+   max 2 sentences; no "also/additionally/and how would you" bundling; no near-duplicate of earlier questions).
+   Rejected drafts are regenerated once with the reasons; if still invalid the first question sentence is kept.
+
+[2026-10-09] Follow-up trail, conditional coding round, company-wise OA datasets
+--------------------------------------------------------------------------------
+Files changed
+- backend/interview_ai.py: wants_coding() (Technical/Mixed + tech role + avg of last 3 non-intro scores >= 7, once per interview,
+  needs a remaining slot), coding_question(), coding-specific evaluation (code + walkthrough + complexity), trail() grouping
+- backend/routes_prep.py: /interview/answer accepts code + language; inserts coding round when earned; report.trail;
+  GET /api/oa-companies (published company OAs); /mock-oa/generate accepts oa_company_id and mimics the dataset pattern
+- backend/routes_admin.py: /api/admin/oa-companies (list, create with files/pasted text, add dataset, publish/hide, delete);
+  Gemini builds a pattern profile (sections, counts, topics, duration, coding style) from the dataset at upload
+- frontend: components/interview/CodingRound.js (NEW: camera+mic permission, live cam in corner, code editor, spoken walkthrough, skip),
+  components/interview/FollowUpTrail.js (NEW), InterviewChat.js + VoiceInterview.js (coding round wiring), InterviewReport.js (trail),
+  pages/MockOA.js ("Hiring now" | "Company-wise OA" toggle), components/admin/OACompanies.js (NEW) + Admin.js tab,
+  components/oa/OATest.js (OAs with 0 coding problems), lib/useSpeech.js (shared speakable())
+
+[2026-10-09] Run code live against judge test cases (OA coding + interview coding round)
+---------------------------------------------------------------------------------------
+Files changed
+- backend/code_runner.py (NEW): local sandbox for Python / JavaScript / C++ (g++ -O2 -std=c++17). Runs as user nobody,
+  own process group, CPU + 256 MB memory + file-size + open-file limits, wall timeouts (C++ 2s, Python/JS 5s), 4 parallel runs,
+  64 KB output cap, temp dir per run; backend/.env is chmod 600 so user code cannot read secrets. Token-based output compare (float tolerance).
+- backend/routes_code.py (NEW): POST /api/code/run. Test suites are built once per problem and cached in Mongo (code_tests):
+  Gemini writes a reference Python solution + 8-10 targeted tests (sample, edge, boundary, stress via deterministic generator);
+  expected outputs are COMPUTED by running the reference in the sandbox (never trusted from the LLM); suite is rejected/regenerated
+  if the reference does not reproduce the problem's own examples. Samples/edge cases show input/expected/got; boundary/stress are hidden.
+- backend/routes_prep.py: OA submit judges each coding answer (languages per problem); final coding score = 70% test pass rate + 30% AI review;
+  interview coding answers are judged and the pass rate feeds the evaluation; prompts now require stdin/stdout problems.
+- backend/interview_ai.py: coding-round problems include input/output format, language limited to Python/JavaScript/C++.
+- frontend: components/code/RunPanel.js (NEW), lib/codeTemplates.js (NEW starter code), components/oa/OATest.js (language picker,
+  Run tests per problem), components/interview/CodingRound.js (Run tests), components/oa/OAResult.js (x/y tests badge).
+Limitation: not a full container sandbox (no network isolation); Java is not installed on this server.
+
+[2026-10-09] Fix: OA / learning resources / AI interview stuck loading
+-----------------------------------------------------------------------
+Cause: user's Gemini API key exhausted its free-tier quota (HTTP 429 on every Gemini model) and the last fallback model was
+overloaded (503, responses taking 60s+), so every AI request retried through all models twice and the UI kept loading.
+Fix (backend/ai.py + backend/.env):
+- Automatic fallback to the Emergent universal key (EMERGENT_LLM_KEY, models in EMERGENT_FALLBACK_MODELS) when the own key fails.
+- Quota-exhausted models are skipped for 30 min, overloaded/timed-out ones for 2 min, so later requests go straight to a working model.
+- Every AI call has a hard timeout (AI_CALL_TIMEOUT_SEC=75) so nothing hangs forever.
+- Update: Emergent key fallback removed at user's request. backend/.env GEMINI_API_KEYS holds 4 Gemini keys (comma separated);
+  ai.py tries the best model on every key before falling back to the next model; a key+model that hits its quota is skipped for 30 min.
+
+[2026-10-09] AI status banner, custom test input, Java support
+---------------------------------------------------------------
+- backend/ai.py status() + GET /api/ai/status (server.py): ok / degraded (main model resting on all keys) / busy (all keys+models resting, retry_in).
+- frontend/src/lib/api.js tracks pending AI requests; components/AIStatusBanner.js (NEW, in App.js) shows a small bottom notice when
+  a request runs >12s, when AI is degraded, or when all keys are at their limit (with an estimated wait).
+- backend/routes_code.py POST /api/code/try: run code once with your own stdin (compile errors, stdout, stderr, status, time).
+  frontend RunPanel "Try custom input" (prefilled with the first example input).
+- Java: code_runner.py supports Java 17 (javac + java -Xmx256m, public class name auto-detected, 4s limit); Java starter template;
+  interview coding round may suggest Java. NOTE: OpenJDK was installed with apt (outside /app) and may need re-install after a pod
+  restart: `apt-get install -y openjdk-17-jdk-headless`. Without it, Java runs return a clear "Java is not installed" message.
+
+[2026-10-09] Proctoring v2: AI vision (face identity, devices, people), gaze, voice, fullscreen lock
+--------------------------------------------------------------------------------------------------
+Files changed
+- frontend/src/lib/proctorVision.js (NEW): @vladmandic/human wrapper (single tfjs). detect() returns faceCount,
+  personCount, devices (COCO: phone/laptop/tv/remote/book), all face embeddings, primary head angle. bestMatch()/similarity()
+  for identity. Models served locally from frontend/public/models/ (blazeface, facemesh, faceres, centernet).
+- frontend/src/lib/useProctor.js: vision loop (2.5s) flags phone_detected, multiple_faces, no_face, gaze_away, and
+  different_person; identity breach state drives a hard lockout. Audio: loud_noise (sudden) + background_voice (sustained
+  talking/second voice, lower threshold). camera_blocked now also triggers on low-variance/uniform frames (hand/paper).
+  Fullscreen: vendor-prefixed detection, 250ms debounce (no false fullscreen_exit), window_blur suppressed in fullscreen,
+  begin() re-syncs state, F11/F12 re-enter fullscreen.
+- frontend/src/components/oa/ProctorMonitor.js: now rendered via React portal to document.body so the live camera stays
+  pinned bottom-right (no drift at page bottom). Adds red fullscreen gate + red IDENTITY lockout overlay with 30s countdown.
+- frontend/src/components/oa/OATest.js: when identityBreach is true, shows the 30s lockout and AUTO-SUBMITS if the registered
+  candidate does not return in time ("Auto-submitted: registered candidate not present").
+- frontend/src/components/oa/ProctorSetup.js: loads models, mandatory face registration (1 face, no devices) + "closed tabs /
+  alone" confirmation before start.
+- backend/routes_prep.py FLAG_WEIGHTS: phone_detected 20, multiple_faces 25, different_person 30, no_face 6, gaze_away 4,
+  background_voice 8 (used for integrity score + accepted by /mock-oa/{id}/flag).
+Behaviour fixes requested by user
+- Mid-test face swap (candidate leaves, another person sits) now triggers different_person -> full red screen -> 30s to return
+  -> auto-submit if the registered face is absent.
+- Noise detection far more sensitive (talking now flags as background_voice / loud_noise).
+- Live camera monitor pinned to bottom-right of the viewport via portal.
+Known limitation: a browser cannot enumerate other open tabs or detect other desktop apps running (sandbox). Covered by the
+mandatory confirmation + tab/blur/fullscreen monitoring. True lockdown needs a desktop app.
+
+[2026-10-09] OA test UX redesign + focus-mode navbar + extension-error guard
+----------------------------------------------------------------------------
+- Extension error "Cannot read properties of undefined (reading 'M_ID')" was thrown by a Chrome EXTENSION
+  (chrome-extension://.../executors/200.js), not our app. Added guards so extension-origin errors never block the app:
+  * frontend/src/index.js: capture-phase window 'error' + 'unhandledrejection' listeners that preventDefault/stop
+    propagation only when the source is a *-extension:// URL.
+  * frontend/craco.config.js: devServer.client.overlay.runtimeErrors filter ignores *-extension:// errors.
+- Focus mode (immersive test): new context/UIMode.js (focusMode flag). Navbar collapses to ONLY the JobLens AI logo
+  + "Assessment in progress" badge during stage check/test; full navbar restored otherwise. MockOA toggles focusMode by stage.
+- OATest.js fully redesigned to ONE QUESTION AT A TIME (was all-questions list):
+  * Flattened all MCQs (across sections) + coding into one ordered list.
+  * Sticky control bar: section dropdown (jumps to that section), Answered x/total, Prev/Next, Timer, Submit.
+  * Question palette: numbered pills (green=answered, ink=current, yellow dot=marked-for-review), horizontally scrollable, arrows.
+  * MCQ view: two-column (question left, radio options right) with "Revisit later" (mark for review) + "Clear response".
+  * Coding view: problem + language select + editor + RunPanel (unchanged logic).
+  * Footer: Previous / Save&Next, last item shows Submit. Matches the reference assessment layout, in the app's theme.
+Note: user is verifying manually (no testing agent run this round, per their instruction).
+
+[2026-10-10] DONE: HackerRank-style coding workspace + proctored AI interview
+------------------------------------------------------------------------------------
+GOAL (user request):
+  1. OA coding questions -> split layout: problem on LEFT, code editor on RIGHT, below it a tabbed console
+     (Test Results | Custom Input) with "Run Code" and "Submit & Next" (Submit auto-runs/checks test cases, then advances).
+  2. AI Interview -> same immersive treatment: fullscreen + fully proctored (camera, face registration, flags), and the
+     interview coding round uses the same split coding workspace. Interview report shows a proctoring integrity section.
+
+DONE so far:
+  BACKEND (routes_prep.py):
+    - InterviewStartIn: added `proctored: bool = False`.
+    - interview_start: stores `proctored` + `flags: []`; returns `proctored` in the start response.
+    - NEW endpoint POST /interview/{session_id}/flag (mirrors /mock-oa/{id}/flag) -> pushes proctor flags to the interview doc.
+    - _final_report: adds report["proctoring"] = proctor_report(fresh or s) so interview reports carry an integrity score.
+  FRONTEND:
+    - lib/useProctor.js: begin(id, flagPath) now takes a configurable flag endpoint (default /mock-oa/{id}/flag; interview
+      passes /interview/{id}/flag). flag() posts to flagUrl.current. Added exported hook useIdentityLockout(breach, onTimeout)
+      (shared 30s red-lockout countdown -> auto-submit) to reuse across OA + interview.
+    - components/code/RunPanel.js: exported TestRow + (CAT) for reuse.
+    - components/code/CodeWorkspace.js (NEW): reusable split coding UI — ProblemPanel (left, sticky/scroll) + language select +
+      Editor (tab-indent) + console tabs [Test Results | Custom Input] + Run Code + optional Submit (auto-runs tests then onSubmit)
+      + optional `footer` slot (used by interview for the spoken walkthrough). Uses /code/run and /code/try.
+    - components/interview/InterviewReport.js: renders <ProctorReport> when report.proctoring exists.
+    - components/oa/OATest.js: imported CodeWorkspace (wiring of the coding branch NOT finished yet).
+
+TODO (next steps, not yet done):
+    - OATest.js: replace the old coding <Card> block with <CodeWorkspace ...>; render the footer nav only for MCQ items.
+    - components/interview/CodingRound.js: rebuild on CodeWorkspace; reuse the proctor camera stream (no separate getUserMedia
+      when proctored); move the "talk me through" box into the footer slot; submit via CodeWorkspace.
+    - pages/AIInterview.js: add proctored flow -> setup -> ProctorSetup("check") -> loading -> chat/voice -> report; useProctor +
+      focus-mode navbar (useUIMode) + begin(session_id, `/interview/${id}/flag`); pass proctor down.
+    - InterviewChat.js & VoiceInterview.js: render <ProctorMonitor> (cam + fullscreen gate + identity lockout via
+      useIdentityLockout) while proctor.active; pass proctor to CodingRound; auto-finish on identity timeout.
+    - Verify compile; user will test manually (no testing agent per user instruction).
+
+
+[2026-10-10] Setup on new pod + finished the coding workspace / proctored interview
+-----------------------------------------------------------------------------------
+- Recreated backend/.env + frontend/.env (not in repo). MONGO_URL = user's Atlas cluster joblensai.6ghq0p1, DB_NAME=joblens_ai (JobLensAI was empty; user accounts + data are in joblens_ai).
+  GEMINI_API_KEYS = 5 keys from api.txt; GEMINI_FALLBACK_MODELS = gemini-3.5/3.6/3.7/3.8-flash, gemini-flash-latest. OpenJDK 17 re-installed.
+- OATest.js: coding items now render <CodeWorkspace> (problem left, editor right, Test Results | Custom Input console,
+  Run Code + Submit & Next / Submit & Finish). Footer Prev/Next only for MCQs. Wider container on coding items.
+- CodingRound.js rebuilt on CodeWorkspace; walkthrough (speak/type) + Skip in the footer slot. When the interview is proctored
+  it reuses the proctor camera stream (no 2nd permission prompt, no separate cam preview).
+- AIInterview.js: "Proctored mode" toggle -> ProctorSetup (camera/mic, face registration, rules) -> fullscreen -> interview.
+  Focus-mode navbar during check/interview. begin(session_id, /interview/{id}/flag, ignore=[background_voice, loud_noise])
+  because the candidate is expected to talk in an interview.
+- components/interview/InterviewProctor.js (NEW): ProctorMonitor + identity lockout (30s) + 5 tab switches -> auto /interview/finish.
+- useProctor.begin() takes an optional list of flag types to ignore.
+- Verified: compile OK, curl (Atlas + Gemini) start -> flag -> answer -> finish returns report.proctoring. User tests UI manually.
+
+[2026-10-10] Real code editor + Prepare tab practice choice + job-based OA
+---------------------------------------------------------------------------
+- frontend/src/components/code/CodeEditor.js (NEW): CodeMirror 6 (@uiw/react-codemirror) with Python/JS/C++/Java modes, one-dark theme,
+  4-space indent unit, language-aware auto-indent on Enter (Python ':' blocks, braces), bracket auto-close, Tab/Shift+Tab indent.
+  Used by CodeWorkspace (OA coding + interview coding round).
+- /prepare no longer generates interview_questions / oa_practice. PrepareTab shows a "Want to practice for this job?" choice:
+  Mock OA for this job (/mock-oa?job=<id>) or Mock interview for this job (/interview?job=<id>). Nothing generated until chosen.
+- MockOA.js JobSetup (?job=): difficulty + proctored toggle; POST /mock-oa/generate {job_id} -> _job_oa_prompt uses ONLY the job posting.
+- interview_ai.context(): when a job is linked, questions mix the job's requirements with the candidate's resume.
+- Tested: testing agent iteration_5, 100% backend + frontend.
+
+[2026-10-10] Coding editor: language boilerplate switch, accepted languages, editor preferences
+-----------------------------------------------------------------------------------------------
+- lib/codeTemplates.js: useCodeDrafts() keeps a draft per problem PER LANGUAGE. Switching language loads that language's
+  starter code (or your earlier draft in it); switching back restores your code. Graded code = current language's draft,
+  or the language you actually wrote in if the current one is untouched. isWritten() ignores untouched templates.
+- GET /api/code/languages -> [{name, available}] (Java availability checked live via shutil.which, so a JDK installed later works
+  without a backend restart). Language dropdown disables unavailable ones; "Accepted: Python · JavaScript · C++ · Java" note.
+- Editor preferences (persisted in localStorage joblens_editor_prefs): font size 12-22px (-/+), Auto-close brackets on/off.
+- Used in OA coding (OATest) and the interview coding round (CodingRound). Verified by screenshot script (no testing agent, per user).
+
+[2026-10-10] ALL-SECTOR CAREER PLATFORM (Phases 1-5)
+====================================================
+Phase 1 - Career foundation
+- backend/careers.py (NEW): 23 sectors (A-V of the brief + Data & Analytics) with roles, job-title classifier regex, OA templates
+  (sections + allowed question types mcq/numeric/written + coding flag), OA types, interview styles, competencies, per-sector match
+  weights, safety notes (healthcare, government). Admin can add/override sectors at runtime: PUT /api/admin/sectors (Mongo career_sectors).
+- Explainable matching: careers.quick_score (lists) + careers.explain (job detail): factors skills/role/sector/experience/location with
+  sector weights; detects "N+ years", degree, licence, certification, work-authorisation requirements -> Met / Not met / Needs confirmation.
+  Score capped at 45 when a detected requirement is unmet; never says "eligible" for unverified requirements.
+- skills.py: ~110 non-tech skills added (sales, finance, HR, healthcare, teaching, trades, logistics, legal, design...).
+- jobs: every job gets `sector` (jobs_service.build + one-time backfill, meta key careers_v1); cross-source dedup flag `duplicate`
+  (title+company+city) run at startup and after each refresh; GET /api/jobs?sector=; low-coverage notice in UI; job detail shows
+  sector + "Last refreshed". No fake jobs added.
+- Resume analysis prompt is profession-neutral; stores education_level, years_experience, certifications, achievements,
+  job_families, transferable_skills. PUT /api/resume/corrections lets users fix extracted data.
+- Career profile: GET/PUT /api/profile (collection career_profiles): target sectors/roles, level, years, education, certs, extra skills,
+  locations, work preference, employment type, interests, portfolio links. Completion %.
+- No-resume builder: POST /api/profile/build-resume (AI structures ONLY the user's answers; saves as resume, source=builder, plain-text draft).
+Phase 2 - Adaptive Mock OA
+- /mock-oa/generate: new fields sector, assessment_type, duration_minutes, num_questions, skill_areas, level. Prompt built from the
+  sector template; coding only for coding sectors; government pattern_note says "practice pattern, verify official notification".
+- Question types: mcq (deterministic), numeric (deterministic, tolerance / 1%), written (AI rubric 0-5 -> 3 pts). Invalid AI questions dropped.
+- Results: section points/% , written feedback + model answer, insights (strengths, weaknesses, skill gaps, next plan, resource search
+  links with Free/paid label), progress vs earlier attempts in the same sector. Grading degrades gracefully if AI is busy.
+- Frontend: MockOA setup (field, role/exam chips, type, difficulty, duration, count, focus skills), OATest numeric + written inputs,
+  OAResult rewritten.
+- Tested (real Gemini, Atlas): sales, teacher, data analyst, SSC CGL, electrician, software engineer -> correct sections/types,
+  coding only for tech/data, submit + grading + insights OK (tests/oa_sector_check.py).
+Phase 3 - Adaptive interviews
+- interview_ai: profession-neutral interviewer, new stages roleplay/case/situational/demo/awareness, style plans (Role-play, Case,
+  Scenario, Managerial, Teaching demo, Government, Field service, Portfolio), sector competencies in context, coding round only when
+  sector.coding. Report adds competencies, answer_frameworks, practice_questions, roadmap; fairness rule (no accent/appearance/emotion).
+- AIInterview setup: field select -> styles; InterviewReport shows the new sections. Tested sales role-play end to end.
+Phase 4 - Prep + community grounding
+- Prep plan prompt is sector-aware + milestones + practice_tasks (shown in PrepareTab). Learning resources: search links on YouTube,
+  Khan Academy, Coursera, Class Central, Google (programming-only types for tech); cost labels; never invented URLs.
+- Community: experiences store sector, level, stages, skills_tested, verified, hidden, reports. POST /api/experiences/{id}/report,
+  admin GET/POST /api/admin/experiences (verify/hide, Admin > Community tab). Retrieval (_experience_ctx) by company OR sector+role,
+  excludes hidden/3+ reports, labels verified vs candidate-reported; used in OA, interview and prep prompts.
+  NOTE: keyword retrieval, not vector search (no Atlas Vector Search index / embedding provider configured).
+Phase 5 - Extra features
+- Application tracker: /api/applications CRUD (Saved..Withdrawn, notes, follow-up date, status history); /tracker page; "Track this job".
+- Career switcher: POST /api/career/switch; Profile > Career switcher.
+- Dashboard: CareerOverview (best matches with "why", skill gaps, profile completion, sector-specific practice links, applications).
+- Privacy: Profile > Privacy (proctoring data explanation) + DELETE /api/me/data.
+Known limitations / remaining
+- Job sources are mostly tech/business ATS boards: healthcare, trades, government, transport, fashion have few listings (UI says so).
+  Government jobs/notifications need an official source (e.g. a gov job API) - not integrated.
+- No salary insights (no reliable source configured); no email/SMS alerts (in-app bell only); no multilingual UI.
+- Alerts still use the old skill-only score. Vector search (RAG) needs an Atlas Vector Search index + embedding model.
+- No testing agent run (user instruction). Verified with curl + screenshots.
+
+[2026-10-10] Removed per user: Profile tabs "Career profile", "Resume corrections", "No-resume builder" (Profile now = Career switcher + Privacy).
+Application tracker removed everywhere (navbar, /tracker route + page, "Track this job" button, dashboard card, /api/applications endpoints).
+Dashboard: profile-completion card and "build a resume" CTA removed. Backend /api/profile, /api/resume/corrections, /api/profile/build-resume
+still exist (unused by UI). Jobs filter bar: Work/Level pills on one line, dropdowns on their own row (no wrapping).
+
+==== 2026-10 · Company OA builder + dataset-first Mock OA engine ====
+ROOT CAUSES
+- "Only 11 questions": the company blueprint drew from an EMPTY question bank, so build_from_blueprint returned None and
+  oa_generate silently fell back to the old single Gemini prompt ("1-4 sections, max 12 each"), which ignored configured counts
+  (8 MCQs + 3 coding = 11). Invalid MCQs were also dropped silently.
+- "Dataset not used": the uploaded PDF was only stored as one flat text blob; Gemini got 3 random 5k-char excerpts and was told
+  "never copy a question verbatim". No question records existed, so nothing could be served as an original.
+- Coding without editor: the AI fallback sometimes put coding problems inside MCQ sections; with no options they were coerced to "written".
+FIXES
+- oa_dataset.py (new): page-level ingestion (pdfplumber text layer; image pages / PNG/JPG screenshots OCR'd by Gemini vision in the
+  background import job), verbatim structured extraction with Gemini structured output (response_json_schema), normalisation into
+  oa_bank records (company, source_dataset, source_page, source_ref, question_type, data{question/options/answer_index | problem/
+  input_format/output_format/constraints/examples/starter_code/tests}, topic, difficulty, is_original, parent_question_id,
+  variant_type, content_hash, status ready|needs_review|incomplete|rejected, answer_verified, harness, review_notes).
+  Answer keys only from the source; MCQs without a source key stay needs_review. Judge harnesses (tests, SQL datasets, DOM tests,
+  per-language starter code) are generated and validated, labelled harness="generated".
+- routes_oa_builder.py: 65/35 selection per section (round(N*0.65) originals); fallback policy: original shortfall -> variants -> related,
+  related shortfall -> variants -> extra originals, reported in test.mix_report + logs. Missing questions are generated before the test
+  (grounded on DB-selected source questions, saved to the bank) and blueprint save auto-tops-up every section. If it still can't fill,
+  /mock-oa/generate returns 409 with the reason (never starts short). Mixed programming sections round-robin DSA/SQL/Web.
+- routes_prep.py: no generic fallback for blueprint companies; coding items found in MCQ sections are moved to coding;
+  exact-count + distinct-id validation; session stores question_order + mix_report.
+- ai.py: ask_structured() (google-genai structured output, key rotation/cooldowns).
+- Frontend: admin Question bank (import status, per-section 65/35 stats, original/variant/related badges, verify/reject/edit/rebuild
+  tests, grounded generation by mode/kind), problem-specific starter code + Reset, judge stdin note, SQL/Web workspaces, sectional timing.
+TESTS RUN (manual curl, no test agent)
+- Accenture blueprint 50+3+45+3: session had 101 questions, 101 distinct ids, mix_report correct (PASS count).
+- Mix: dataset has 0 MCQ/behavioral originals and ~11 ready programming originals, so 65% cannot be met for MCQ sections;
+  shortfall is reported, not hidden.
+- Coding: starter code for Python/Java/C++/JavaScript compiled per problem; judge runs real sandboxed code (existing runner).
+- Dataset failure: empty bank + Gemini rate-limit -> 409 with explanation (seen before top-up).
+LIMITATIONS
+- SQL runs on a MySQL-compatible SQLite sandbox. Most Accenture SQL items have no schema in the source -> marked incomplete (seed variants only).
+- OCR quality depends on Gemini; uncertain pages are flagged needs_review. Raw upload bytes are only kept in memory for the import job.

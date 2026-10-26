@@ -1,0 +1,25 @@
+{
+  "summary": "Iteration 5 — tested the three requested changes: (1) CodeMirror code editor behaviour in Mock OA coding questions, (2) Prepare tab practice-choice (no auto-generated interview/OA sections), (3) Mock OA for a job and Interview linked to a job. Backend: wrote /app/backend/tests/test_prepare_oa_job.py (2 tests, both PASS in ~20s against real Gemini). Confirmed POST /api/prepare returns match_summary/skill_gap/roadmap/important_subjects for a cached JustPlay job plan (no new interview_questions/oa_practice keys for new plans — prompt schema no longer requests them). POST /api/mock-oa/generate {job_id, difficulty:'Easy'} returned company='JustPlay GmbH', topic='Senior Product Manager - Meta (all genders)', proctored=false, test.title='Senior Product Manager - Meta at JustPlay Online Assessment' with 3 sections (Product Strategy / Analytical Reasoning / Communication). Frontend (Playwright, admin@joblens.dev): /jobs → first job detail → Prepare tab shows prepare-practice-choice BEFORE plan generation with correct hrefs /mock-oa?job=<id> and /interview?job=<id>; generate-prep-btn also present; body text contains NO 'Interview Questions' or 'OA Practice' headings. prepare-choice-oa opens /mock-oa?job= and renders oa-job-setup with oa-job-diff-easy/medium/hard, oa-job-proctor-toggle, oa-job-generate-btn; oa-job-clear returns to normal Setup (oa-topic-input visible). prepare-choice-interview opens /interview?job= and iv-job-linked badge is visible with role/company prefilled. Generated a non-proctored OA from admin (Python Basics Easy, 15 MCQ + 2 coding, 17 palette items). Coding item c1 verified: data-testid code-editor present, code-tab-results-c1, code-tab-custom-c1, code-run-btn-c1, code-submit-btn-c1 all exist; footer oa-prev-btn and oa-next-btn correctly HIDDEN on coding items. CodeMirror behaviour: Python 'def f(x):' + Enter → 4-space indent (OK); nested 'if x:' + Enter → 8-space indent (OK); Tab at line start increases indent to 12 and focus stays inside .cm-content (OK); JavaScript 'function f() {' + Enter + '}' → 4-space body indent with auto-closed brace (OK). Console tabs Test Results ↔ Custom Input switch correctly (code-custom-stdin-c1 renders).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_prepare_oa_job.py",
+    "/app/test_reports/pytest/prepare_oa_job.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "routes_prep.oa_generate: when both job_id and oa_company_id are set the code first overwrites company/topic from the job then still tries to look up oa_company_id (now blanked), which is fine, but the prompt is finally overridden by _job_oa_prompt — the branching is correct but a touch harder to read than needed.",
+    "PrepareTab PracticeChoice uses an inline Link array; good UX but no loading/busy state is required since there's no API call — fine.",
+    "CodeEditor.js uses the `indentOnInput: true` basicSetup flag which is what drives Python ':' auto-indent via @codemirror/lang-python's indent service — behaviour verified. Note: with `closeBrackets: true` typing '{' + Enter in JS yields '{\\n    cursor\\n}' (auto-closed), which the user may or may not want when they are typing just an opening brace; acceptable default.",
+    "MockOA.js JobSetup: when the job fetch fails it calls onClear() which rewrites the URL — good. Error toast is also shown.",
+    "backend _job_oa_prompt could optionally include job's `requirements` field (if separately stored) but description[:5000] covers it in practice."
+  ],
+  "updated_files": ["/app/backend/tests/test_prepare_oa_job.py"],
+  "success_rate": {"backend": "100% (2/2 pytest)", "frontend": "100% — all data-testids present, Python/JS auto-indent and Tab behaviour verified, practice-choice flows end-to-end"},
+  "test_credentials": "admin@joblens.dev / Admin@12345",
+  "seed_data_creation": "Created 1 cached /prepare plan + 1 Mock OA session (job-based, non-proctored, not submitted) + 1 Mock OA session (Python Basics Easy, not submitted) for admin via the backend/frontend during testing.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "All three requested behaviours work end-to-end on real Atlas + real Gemini. Backend test suite: /app/backend/tests/test_backend.py, test_new_features.py, test_proctor_admin.py, test_prepare_oa_job.py. Admin runs are safe (admin is exempt from device-ban), do not run auth/ban stress with admin. Mock OA generation takes ~30s on Gemini free tier — allow 130s timeout. Coding problems always use ids c1,c2,c3 — tests should discover the id dynamically because MCQ:coding split varies.",
+  "rca of the issue": "N/A — no bugs found. All three user-requested changes are implemented correctly and verified."
+}

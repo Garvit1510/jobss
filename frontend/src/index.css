@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { scroll-behavior: smooth; }
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+    background-image: radial-gradient(rgba(17, 17, 17, 0.09) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+  h1, h2, h3, h4 { @apply font-display; }
+  ::selection { background: #FFE14D; color: #111; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: #F4F1E8; }
+  ::-webkit-scrollbar-thumb { background: #111; }
+}
+
+@layer components {
+  .brutal-card { @apply bg-white border-3 border-ink shadow-brutal; }
+  .brutal-btn {
+    @apply inline-flex items-center justify-center gap-2 font-display font-bold border-3 border-ink px-5 py-2.5 shadow-brutalsm select-none;
+    transition: transform 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+  }
+  .brutal-btn:hover:not(:disabled) { transform: translate(-2px, -2px); box-shadow: 5px 5px 0 #111; }
+  .brutal-btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: 0 0 0 #111; }
+  .brutal-btn:disabled { @apply opacity-50 cursor-not-allowed; }
+  .brutal-input {
+    @apply w-full bg-white border-3 border-ink px-4 py-3 font-sans outline-none placeholder:text-ink/40;
+    transition: box-shadow 0.15s ease;
+  }
+  .brutal-input:focus { box-shadow: 4px 4px 0 #4D6FFF; }
+  .tag-chip { @apply inline-flex items-center gap-1 border-2 border-ink bg-offwhite px-2.5 py-1 font-mono text-xs font-medium; }
+  .eyebrow { @apply font-mono text-xs uppercase tracking-[0.2em] text-ink/60; }
+  .skeleton {
+    background: linear-gradient(90deg, #EEEAE0 0px, #F8F6EF 80px, #EEEAE0 160px);
+    background-size: 800px 100%;
+    @apply animate-shimmer;
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "summary": "Iteration 3 — regression focused on the 'destroy is not a function' React runtime error and the new 10s auto-submit option. Verified the fix: zero pageerrors and zero occurrences of 'destroy is not a function' across (a) voice mode full 3-question flow with typed answers, (b) voice-stop flow with 1 answer, and (c) text mode with 2 answers. All iv-evaluation blocks render as expected and iv-report renders in every flow. Auto-submit panel exposes 2s/3s/5s/10s; clicking 10s sets aria-pressed=true, writes {\"on\":true,\"ms\":10000} to localStorage 'joblens_auto_submit', and the 10s choice persists after a full reload+new session (aria-pressed=true on fresh voice session). auto-submit-toggle flips checked state correctly. voice-stop produces iv-report with Technical/Communication/Confidence scores, Strengths, Mistakes, How-to-improve, Recommendations. voice-coach is correctly absent when answers were typed (no audio metrics), which matches implementation.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix applied in InterviewChat.js (line 24-26) and VoiceTranscript.js (line 7-9) is correct: useEffect callbacks are now wrapped in braces so they return undefined instead of the Promise returned by element.scrollIntoView() in newer Chrome. Consider adding an ESLint rule (consistent-return / react-hooks/exhaustive-deps with --no-implicit-return hint) or a short code review guideline to flag single-expression effect callbacks that call DOM APIs, to prevent regressions elsewhere.",
+    "AutoSubmit.js is clean and small; the 10s option simply added to OPTIONS array works end-to-end. No concerns.",
+    "Carry-over from iteration_2 still open: routes_prep.interview_answer has no retry on AI 503 (iteration_1 flag); unchanged this run."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only run)", "frontend": "100% (voice flow, voice-stop flow, text flow, 10s selection + persistence, toggle all pass; 0 destroy errors)"},
+  "test_credentials": "test1@joblens.dev / Test@12345",
+  "seed_data_creation": "Three interview sessions were created and completed (2 voice + 1 text). They remain in Past interviews history for test1@joblens.dev; harmless. localStorage joblens_auto_submit left as {on:true,ms:10000}.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The 'destroy is not a function' overlay is fully fixed. iv-num-questions is a <input type=range>, not a dropdown — to change it in Playwright use native value setter + dispatch input event. auto-submit-panel is only rendered inside VoiceInterview AFTER iv-start-btn is clicked (not on Setup page). voice-coach only renders when audio metrics are present; typed-answer runs will not show it (expected). Headless cannot exercise real STT. Backend regression suites still at /app/backend/tests/test_backend.py and test_new_features.py.",
+  "rca of the issue": "RCA: In React 18+, useEffect's callback body `end.current?.scrollIntoView(...)` was an implicit arrow return. In newer Chromium builds, scrollIntoView() returns a Promise, which React then treated as the effect's cleanup function. On the next effect re-run, React invokes `destroy()` → 'TypeError: destroy is not a function' (safelyCallDestroy / commitHookEffectListUnmount). Reproduction: trigger a state update that re-runs the effect (e.g. answering a question updates msgs/log, triggering the scroll effect). Mitigation: wrap in braces so the callback returns undefined — applied in InterviewChat.js and VoiceTranscript.js. Verified in this iteration with 0 destroy errors across voice 3Q, voice-stop, and text flows."
+}

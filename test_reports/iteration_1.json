@@ -1,0 +1,47 @@
+{
+  "summary": "First test iteration. Backend (20 pytest cases) all pass. Frontend end-to-end verified: landing page shows live job count 7,604 and 12 sources; login works; dashboard renders real resume score (68/100), skills, recommended roles; jobs listing (2,234 for 'engineer') with search/filters/sort; job detail with Overview/Prepare/Learning/Community tabs; Prepare generates plan; Learning loads resources; Community shows empty state and share-experience submission appears in list; AI Interview starts, delivers question-by-question with per-answer feedback; Mock OA generates 15 questions with company picker and timer. Two intermittent Gemini 503s observed under rapid AI calls: /api/interview/answer (3rd call) and /api/experiences/insights. Destructive IP-ban curl test deliberately NOT executed (would permanently ban container IP); ready-to-run script left at /app/backend/tests/ban_flow.sh.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/interview/answer", "issue": "Intermittent 503 from Gemini/LiteLLM on rapid consecutive answer calls — no server-side retry. Consider adding a 1-2x retry with jitter in ai.ask_json for interview and insights flows."},
+      {"endpoint": "/api/experiences/insights", "issue": "Returned 503 during the test run (Gemini transient). Same mitigation: add retry/backoff."},
+      {"endpoint": "/api/mock-oa/generate", "issue": "One 503 observed earlier in the run; a second attempt succeeded. Same cause (Gemini transient)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {"flow": "AI Interview final report", "issue": "If any single POST /api/interview/answer returns 503 mid-session, UI leaves the answer in the textbox with no retry button and the final iv-report is never produced. User would need to refresh and lose progress.", "affected_selectors": ["[data-testid=iv-send-btn]", "[data-testid=iv-report]"]}
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_backend.py",
+    "/app/backend/tests/ban_flow.sh",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add retry-with-backoff (1-2 retries) in backend AI helper (ai.ask_json) for transient Gemini 503s — currently any single 503 kills Interview final report and Experience insights.",
+    "In AI Interview UI, when POST /api/interview/answer fails, keep the typed answer and surface a 'Retry' CTA instead of silently halting the session.",
+    "(Optional) Destructive multi-account ban flow was not executed by this agent to preserve the container IP; main agent or next tester may run /app/backend/tests/ban_flow.sh as the final action."
+  ],
+  "critical_code_review_comments": [
+    "server.py: using the deprecated FastAPI @app.on_event('startup'); should migrate to lifespan context manager (non-blocking).",
+    "auth.is_banned reads env on every request — fine functionally; consider caching IP_BAN_ENABLED.",
+    "routes_core.list_jobs with sort='best': loads up to 20,000 jobs into memory then scores+sorts in Python on every page request. With 7,604 jobs today this is OK (~sub-second observed) but will not scale; move match-scoring to a cached per-user ranking or MongoDB aggregation.",
+    "ai failures propagate as 503 to clients with no retry — see action_items.",
+    "LIST_PROJ in routes_core correctly excludes `_id`; good.",
+    "Single-session invalidation via active_session_id works but relies on a GET /api/auth/me cycle (frontend polling) to detect replacement — not instant push. Acceptable for MVP."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_backend.py (new)",
+    "/app/backend/tests/ban_flow.sh (new, destructive — not executed)"
+  ],
+  "success_rate": {"backend": "100% (20/20 pytest)", "frontend": "~90% (all primary flows verified; final interview report blocked by transient Gemini 503)"},
+  "test_credentials": "test1@joblens.dev / Test@12345 (as documented in /app/memory/test_credentials.md)",
+  "seed_data_creation": "Submitted one real experience post for Notion via UI (community tab) — remains in DB. Several brute-force dummy login attempts created lockout rows in db.login_attempts for throwaway emails (no real user affected).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Full backend pytest in /app/backend/tests/test_backend.py (set REACT_APP_BACKEND_URL env). Ban-flow curl script in /app/backend/tests/ban_flow.sh is destructive and intentionally unexecuted. The pytest session_replaced test uses a new device_id, which invalidates whatever browser session is logged in — just re-login via UI if continuing manual testing. REACT_APP_BACKEND_URL from frontend/.env is https://career-lens-ai-3.preview.emergentagent.com (both this and the URL in the review request resolve to the same backend). Gemini 503s are intermittent; AI endpoints lack retry.",
+  "rca of the issue": "Intermittent 503s on AI endpoints: backend ai.ask_json wraps LiteLLM/Gemini call; when Gemini returns a transient upstream error the helper raises and FastAPI returns 503 with no retry. During a 3-question interview run, the 3rd POST /api/interview/answer failed, so the session never reached the final-report branch (which likely only runs server-side after answering the last question). Reproduce: fire /api/interview/answer calls back-to-back within ~15s. Mitigation: wrap the LLM call in a tenacity retry (2 attempts, exponential backoff, retry on HTTP 429/500/503) and/or on the frontend, treat 503 from /interview/answer as retryable (show Retry button, preserve answer)."
+}

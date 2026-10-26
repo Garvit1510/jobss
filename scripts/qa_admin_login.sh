@@ -1,0 +1,2 @@
+curl -s -c /app/scripts/.ck -X POST http://localhost:8001/api/auth/login -H "Content-Type: application/json" -d '{"email":"admin@joblens.dev","password":"Admin@12345","device_id":"devadmin000000000000001"}' > /dev/null
+curl -s -c /app/scripts/.uk -X POST http://localhost:8001/api/auth/login -H "Content-Type: application/json" -d '{"email":"test1@joblens.dev","password":"Test@12345","device_id":"devtest000000000000001"}' > /dev/null

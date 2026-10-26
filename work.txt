@@ -1,0 +1,165 @@
+================================================================================
+JOBLENS AI — PROJECT WORK DOCUMENT (work.txt) — REBUILD v2
+================================================================================
+Tagline: "Upload Resume. Discover Opportunities. Prepare Smarter."
+Type: AI-powered career intelligence platform. Premium Neo-Brutalism UI.
+Last updated: 2026-10-09 (v4)
+
+================================================================================
+1. USER CHOICES (confirmed)
+================================================================================
+  - Stack: React (CRA + CRACO) + FastAPI + MongoDB
+  - AI: user's own Gemini API keys (GEMINI_API_KEYS in backend/.env), called
+        through the Google GenAI SDK with quota-aware key/model rotation.
+        No mock / fallback content: if AI fails after 4 retries the API returns 503.
+  - Jobs: 12 free real sources, NO mock data, salary shown in the original currency.
+  - Auth: email + password + name (no OTP). One account per device, one active
+          session per account, permanent ban (device + IP + account) on multi-account attempts.
+  - Community: starts empty, real user posts only.
+  - Voice interviewer: FREE browser Web Speech API (no paid voice service).
+  - Job alerts: in-app bell. Country filter: countries found in real job locations + "Remote / Anywhere".
+
+================================================================================
+2. TECH STACK
+================================================================================
+FRONTEND: React 18, React Router 6, Tailwind 3, Framer Motion 11, lucide-react,
+          react-dropzone, axios (fetch adapter), sonner (toasts), Web Speech API (browser built-in)
+BACKEND:  FastAPI, Motor, bcrypt, PyJWT, httpx, pdfplumber, python-docx, google-genai
+DATABASE: MongoDB (MONGO_URL + DB_NAME="joblens_ai")
+FONTS:    Space Grotesk (display), Inter (body), JetBrains Mono (mono)
+COLORS:   ink #111111, paper #FDFBF4, offwhite #F4F1E8, yellow #FFE14D, blue #4D6FFF,
+          green #22C55E, red #FF5A4D, purple #C4B5FD. Hard shadows 3/6/10px, 3px borders.
+
+================================================================================
+3. FILES
+================================================================================
+BACKEND (/app/backend)
+  server.py          App, CORS, routers, startup (indexes, migration, 6h job refresh loop)
+  database.py        Mongo client + indexes
+  auth.py            Register/login/refresh/me/logout, device + IP ban, single session, brute force
+  ai.py              Gemini JSON helper [UPDATED v3]: model fallback chain (GEMINI_FALLBACK_MODELS) + 60s cooldown on 429
+  resume_parser.py   PDF/DOCX text extraction
+  skills.py          ~110 tech skills regex extractor + canonical names
+  countries.py       [NEW v2] Country detection from job location text (+ "Remote / Anywhere")
+  jobs_service.py    12 source fetchers, normalisation, live FX (open.er-api.com) for salary sort,
+                     upsert with first_seen_at, stale removal, SmartRecruiters lazy description, match score
+  routes_core.py     Resume upload/analysis, dashboard, jobs list/detail/sources/countries, companies
+  routes_prep.py     Prepare plan, learning resources, community experiences + AI insights,
+                     Mock OA generate/submit/history, AI interview start/answer/finish/history
+  routes_alerts.py   [NEW v2] Saved job alerts CRUD, new-job counts, new-job list, mark seen
+  tests/             test_backend.py (pytest), ban_flow.sh (destructive, run last), sample resume at /app/tests
+FRONTEND (/app/frontend/src)
+  App.js, index.js, index.css, lib/api.js, lib/device.js (fingerprint), lib/format.js (currency)
+  lib/useSpeech.js                 [NEW v2] SpeechSynthesis + SpeechRecognition hook, mic permission
+  context/AuthContext.js           Session state, 15s session poll, replaced/banned events
+  components/ui.js, Navbar.js, JobCard.js, Loaders.js
+  components/AlertsBell.js         [NEW v2] Bell with new-jobs count (polls every 60s)
+  components/job/PrepareTab.js, LearningTab.js, CommunityTab.js
+  components/oa/OATest.js, OAResult.js
+  components/interview/InterviewChat.js (text), InterviewReport.js [UPDATED v2: recommendations]
+  components/interview/VoiceInterview.js   [NEW v2] Spoken interview loop + controls + timer
+  components/interview/VoiceOrb.js         [NEW v2] Animated speaking/listening/processing/error state
+  components/interview/VoiceTranscript.js  [NEW v2] Live transcript + editable answer (text fallback)
+  components/interview/AutoSubmit.js       [NEW v3] Silence detection hook + auto-submit panel/countdown
+  components/interview/VoiceCoach.js       [NEW v3] Voice Answer Coach section in the report
+  pages/Landing.js, AuthPage.js, UploadPage.js, Dashboard.js, JobDetails.js, MockOA.js
+  pages/Jobs.js        [UPDATED v2] Country filter + "Alert me on new jobs"
+  pages/AIInterview.js [UPDATED v2] Voice / Text mode picker
+  pages/Alerts.js      [NEW v2] Manage alerts, see new jobs, mark seen, delete
+
+================================================================================
+4. JOB SOURCES (all free, no keys)
+================================================================================
+  Greenhouse (34 companies), Lever (6), Ashby (12), Workable (1), SmartRecruiters (6),
+  Recruitee (2), Remotive, Arbeitnow, RemoteOK, Himalayas, Jobicy, The Muse.
+  ~7,600 jobs. Refreshed every JOBS_REFRESH_HOURS (6). Later: Adzuna, JSearch (need keys).
+
+================================================================================
+5. API ENDPOINTS (/api)
+================================================================================
+  auth: POST register, login, refresh, logout · GET me
+  POST /resume/upload · GET /resume · GET /dashboard
+  GET /jobs (q, work, level, source, country, sort, page) · /jobs/sources · /jobs/countries
+  GET /jobs/{id} · POST /jobs/refresh · GET /companies
+  POST /prepare · GET /learning · POST/GET /experiences · GET /experiences/insights
+  POST /mock-oa/generate · /mock-oa/submit · GET /mock-oa/history
+  POST /interview/start (mode text|voice) · /interview/answer · /interview/finish [NEW] · GET /interview/history · /interview/{id}
+  [NEW] POST /alerts · GET /alerts · GET /alerts/summary · GET /alerts/{id}/new · POST /alerts/{id}/seen · DELETE /alerts/{id}
+
+================================================================================
+6. VOICE INTERVIEWER (v2) — HOW IT WORKS
+================================================================================
+  Loop: AI question spoken (SpeechSynthesisUtterance) -> mic auto-starts (webkitSpeechRecognition,
+  continuous + interim results) -> live transcript shown & editable -> Submit -> Gemini evaluates
+  (backend) -> AI speaks one-sentence feedback -> next question spoken -> ... -> final report
+  (score, verdict, technical/communication/confidence, strengths, mistakes, improvements,
+  recommendations, per-question).
+  Controls: Start Interview, Repeat question, Mic on/off, Submit answer, Stop interview
+  (Stop generates a report for answered questions via /interview/finish).
+  States: speaking, listening, processing, idle (mic paused), error; mic permission warnings.
+  Fallbacks: unsupported browser / denied mic / no mic -> type answers in the same box.
+  Best in Chrome or Edge (SpeechRecognition). Requires HTTPS (the preview URL is HTTPS).
+
+================================================================================
+6b. v3 CHANGES — AUTO-SUBMIT, VOICE COACH, ERROR FIX
+================================================================================
+  BUG (errors after Submit): root cause = Gemini FREE-TIER RATE LIMIT (HTTP 429 "You exceeded your
+  current quota") on gemini-3-flash-preview when several AI calls happen within a minute
+  (answer evaluation + next question + final report). Backend returned 503.
+  FIX: ai.py now tries a chain of Gemini models on the same key, each with its own free quota:
+       gemini-3-flash-preview -> gemini-3.5-flash -> gemini-3.6-flash -> gemini-3.7-flash -> gemini-3.8-flash
+       A model that returns 429 is skipped for 60s. Env: GEMINI_FALLBACK_MODELS.
+       Frontend auto-retries a failed answer once after 4s, keeps your answer, de-duplicates toasts.
+       Speech fixes: speak() no longer hangs if the browser never fires 'onend' (safety timeout);
+       old speech can no longer re-open the mic during evaluation (askToken guard);
+       double submit is blocked.
+  AUTO-SUBMIT: while listening, every speech-recognition result marks "activity". When you have said
+       at least 2 words and stay silent for 2s / 3s (default) / 5s (selectable), the answer submits
+       automatically. A yellow countdown bar shows before it fires; keep talking to cancel it.
+       Toggle "Auto-submit when I stop talking" to go back to manual Submit. Typing in the answer box
+       stops the mic (manual mode for that answer).
+  VOICE ANSWER COACH: frontend sends per-answer metrics {words, duration_sec, long_pauses (>2s gaps),
+       longest_pause_sec}; backend counts filler words (um, uh, erm, hmm, like, you know, basically,
+       actually, literally, I mean, kind of, sort of, so yeah, okay so), computes words-per-minute and
+       pace label (<100 too slow, 100-165 good, >165 too fast). Report shows pace, filler totals + top
+       fillers, long pauses, per-question table and AI "delivery_feedback" tips.
+       Note: browsers often drop "um/uh" from transcripts, so real filler counts may be higher.
+  API: POST /interview/answer now accepts optional "metrics"; report adds "voice_coach" + "delivery_feedback".
+
+================================================================================
+7. SETUP
+================================================================================
+  backend/.env: MONGO_URL, DB_NAME, FRONTEND_URL, JWT_SECRET, GEMINI_API_KEY, GEMINI_MODEL,
+                GEMINI_FALLBACK_MODELS, IP_BAN_ENABLED, JOBS_REFRESH_HOURS, TRUSTED_PROXY_HOPS
+  frontend/.env: REACT_APP_BACKEND_URL
+  To use your own DB: set MONGO_URL to your local MongoDB or MongoDB Atlas connection string.
+  To change the Gemini key: edit GEMINI_API_KEY and restart the backend.
+  Services run under supervisor: sudo supervisorctl restart backend / frontend
+
+================================================================================
+8. STATUS
+================================================================================
+  v1 (2026-10-09): rebuild done. Tested: backend 20/20, frontend main flows pass.
+  v2 (2026-10-09): voice interviewer, job alerts (bell), country filter. Tested: backend 10/10 new + 20/20 old, frontend 100%.
+  v3 (2026-10-09): automatic end-of-answer detection (silence), Voice Answer Coach, submit-error fix.
+      Not verified by the testing agent (user asked not to run it); checked with curl + screenshots.
+  v4 (2026-10-09): FIX red React overlay "TypeError: destroy is not a function" after submitting an answer.
+      Root cause: useEffect(() => el.scrollIntoView(...)) implicitly returned scrollIntoView's result
+      (newer Chrome returns a Promise) and React tried to call it as a cleanup function.
+      Fixed in components/interview/InterviewChat.js and VoiceTranscript.js (effects wrapped in braces).
+      Added 10s auto-submit option (2s/3s/5s/10s) in AutoSubmit.js; choice saved in localStorage
+      (joblens_auto_submit) in VoiceInterview.js. Verified by testing agent (iteration_3): 0 runtime errors.
+  v5 (2026-10-09): env recreated (user Gemini keys + MongoDB Atlas); background interview evaluation (grading off the
+      critical path, surfaces only in the report) so the interview conversation flows without pauses.
+  v6 (2026-10-09): Proctored OA AI VISION overhaul (@vladmandic/human, local models in frontend/public/models/):
+      face registration at start; live flags for different_person, multiple_faces, phone/second-screen/book (device_in_view),
+      no_face, gaze_away; sustained talking / second-voice (background_voice) + loud_noise; camera-block incl. hand/paper
+      over lens. Mid-test face swap -> red full-screen 30s lockout -> auto-submit if the registered candidate does not return.
+      Fullscreen made reliable (no false "not fullscreen" flag), full-screen lock gate, F11/F12 re-enter fullscreen.
+      Live camera monitor pinned bottom-right via a portal. See /app/progress.txt. Browser cannot see other tabs / desktop apps.
+  v7 (2026-10-09): OA test UX redesign — one-question-at-a-time flow (section dropdown, numbered question palette with
+      answered/marked states, Prev/Next, Clear response, Revisit-later), immersive focus-mode navbar (logo only +
+      "Assessment in progress" during the test), and a guard that stops browser-extension errors from blocking the app
+      (index.js listeners + craco overlay filter). See /app/progress.txt.
+  Next: subscriptions, Adzuna/JSearch, admin view of proctoring reports, snapshot evidence on flags.
+================================================================================

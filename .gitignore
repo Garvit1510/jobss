@@ -1,0 +1,12 @@
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
+node_modules/
+.venv/
+venv/
+__pycache__/
+frontend/build/
