@@ -54,9 +54,7 @@ def _attempts(images=None):
         if model:
             attempts.append(("groq", groq_key, model))
     attempts.extend(("gemini", key, model) for key, model in _models())
-    now = time.time()
-    ready = [a for a in attempts if _cooldown.get(_cooldown_key(*a), 0) <= now]
-    return ready or sorted(attempts, key=lambda a: _cooldown.get(_cooldown_key(*a), 0))
+    return attempts
 
 
 def _limit_attempts(attempts, max_attempts):
@@ -170,9 +168,13 @@ async def ask_json(system: str, prompt: str, rounds: int = 2, max_attempts: int 
                 groq_attempted = True
             ATTEMPTS["n"] += 1
             try:
+                log.info("AI request attempting %s / %s", provider.upper(), model)
                 if provider == "groq":
-                    return await _call_groq(key, model, system, prompt)
-                return await _call(key, model, system, prompt)
+                    result = await _call_groq(key, model, system, prompt)
+                else:
+                    result = await _call(key, model, system, prompt)
+                log.info("AI request succeeded using %s / %s", provider.upper(), model)
+                return result
             except Exception as e:
                 last = e
                 _record_failure(provider, key, model, e)
@@ -186,13 +188,15 @@ def status():
     groq_key = os.environ.get("GROQ_API_KEY", "").strip()
     groq_model = os.environ.get("GROQ_MODEL", "").strip()
     groq_configured = bool(groq_key and groq_model)
-    groq_ready = bool(groq_configured and _cooldown.get(("groq", groq_key, groq_model), 0) <= now)
+    groq_cooldown_until = _cooldown.get(("groq", groq_key, groq_model), 0)
+    groq_ready = groq_configured
+    groq_cooling_down = bool(groq_configured and groq_cooldown_until > now)
     gemini_ready = sum(1 for key in gemini_keys for model in gemini_models if _cooldown.get((key, model), 0) <= now)
     gemini_configured = bool(gemini_keys and gemini_models)
     any_ready = groq_ready or gemini_ready > 0
     waits = []
-    if groq_configured:
-        waits.append(_cooldown.get(("groq", groq_key, groq_model), 0) - now)
+    if groq_cooling_down:
+        waits.append(groq_cooldown_until - now)
     waits.extend(_cooldown.get((key, model), 0) - now for key in gemini_keys for model in gemini_models)
     retry_in = 0 if any_ready else max(0, int(min(waits))) if waits else 0
     state = "ok" if groq_ready or (not groq_configured and gemini_ready) else "degraded" if any_ready else "busy"
@@ -203,7 +207,7 @@ def status():
         "keys_ready": keys_ready,
         "retry_in": retry_in,
         "providers": {
-            "groq": {"configured": groq_configured, "ready": groq_ready, "model": groq_model or None},
+            "groq": {"configured": groq_configured, "ready": groq_ready, "cooling_down": groq_cooling_down, "model": groq_model or None},
             "gemini": {"configured": gemini_configured, "ready": gemini_ready, "keys": len(gemini_keys)},
         },
     }
@@ -245,13 +249,18 @@ async def ask_structured(system: str, prompt: str, schema: dict, images=None, ro
             ATTEMPTS["n"] += 1
             try:
                 if provider == "groq":
-                    return await _call_groq(key, model, system, prompt, schema=schema, images=images,
-                                            timeout=timeout or float(os.environ.get("AI_CALL_TIMEOUT_SEC", "75")) * 3)
-                r = await asyncio.wait_for(_client(key).aio.models.generate_content(model=model, contents=contents, config=cfg_for(model)),
-                                           timeout or float(os.environ.get("AI_CALL_TIMEOUT_SEC", "75")) * 3)
-                if not r.text:
-                    raise ValueError("Gemini returned an empty response")
-                return json.loads(r.text)
+                    log.info("AI request attempting GROQ / %s", model)
+                    result = await _call_groq(key, model, system, prompt, schema=schema, images=images,
+                                              timeout=timeout or float(os.environ.get("AI_CALL_TIMEOUT_SEC", "75")) * 3)
+                else:
+                    log.info("AI request attempting GEMINI / %s", model)
+                    r = await asyncio.wait_for(_client(key).aio.models.generate_content(model=model, contents=contents, config=cfg_for(model)),
+                                               timeout or float(os.environ.get("AI_CALL_TIMEOUT_SEC", "75")) * 3)
+                    if not r.text:
+                        raise ValueError("Gemini returned an empty response")
+                    result = json.loads(r.text)
+                log.info("AI request succeeded using %s / %s", provider.upper(), model)
+                return result
             except Exception as e:
                 last = e
                 _record_failure(provider, key, model, e)

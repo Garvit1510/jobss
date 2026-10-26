@@ -127,6 +127,34 @@ def test_groq_failure_still_reaches_gemini_with_single_attempt_limit(monkeypatch
     assert calls == ["groq", "gemini"]
 
 
+def test_groq_is_attempted_first_even_during_previous_cooldown(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "groq-secret")
+    monkeypatch.setenv("GROQ_MODEL", "llama-test")
+    monkeypatch.setenv("GEMINI_API_KEYS", "gemini-secret")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-test")
+    monkeypatch.setenv("GEMINI_FALLBACK_MODELS", "")
+    ai._cooldown.clear()
+    ai._cooldown[("groq", "groq-secret", "llama-test")] = time.time() + 120
+    calls = []
+
+    async def succeed_groq(key, model, system, prompt):
+        calls.append("groq")
+        return {"provider": "groq"}
+
+    async def succeed_gemini(key, model, system, prompt):
+        calls.append("gemini")
+        return {"provider": "gemini"}
+
+    monkeypatch.setattr(ai, "_call_groq", succeed_groq)
+    monkeypatch.setattr(ai, "_call", succeed_gemini)
+
+    result = asyncio.run(ai.ask_json("system", "prompt", rounds=1))
+
+    assert result == {"provider": "groq"}
+    assert calls == ["groq"]
+    assert ai.status()["providers"]["groq"]["cooling_down"] is True
+
+
 def test_structured_groq_call_receives_schema_and_image(monkeypatch):
     captured = {}
 
@@ -194,5 +222,10 @@ def test_status_reports_groq_primary_and_gemini_fallback(monkeypatch):
 
     assert result["state"] == "ok"
     assert result["keys_ready"] == 1
-    assert result["providers"]["groq"] == {"configured": True, "ready": True, "model": "llama-test"}
+    assert result["providers"]["groq"] == {
+        "configured": True,
+        "ready": True,
+        "cooling_down": False,
+        "model": "llama-test",
+    }
     assert result["providers"]["gemini"] == {"configured": True, "ready": 2, "keys": 2}
